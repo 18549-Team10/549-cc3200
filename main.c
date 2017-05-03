@@ -106,7 +106,7 @@
 #define BUF_SIZE           1400
 #define UDP_PACKET_COUNT   1
 #define TRANSFER_SAMPLES 	256
-#define HEADER_SIZE 			8
+#define HEADER_SIZE 			12
 
 //*********** adc *********
 #define USER_INPUT
@@ -153,6 +153,13 @@ typedef enum{
 #define DUTYCYCLE_GRANULARITY   { 31, 35, 39, 45, 52 }
 #define DUTY_CYCLE				128 /*[0,255]*/
 
+#define NUMBER_TRAINING_TESTS 100
+#define NUMBER_CLASSIFY_TESTS 1
+
+#define FILL_GRANULARITY 5
+
+typedef enum {EMPTY, QUARTER, HALF, THREE_QUARTER, FULL, UNKNOWN} fillLevel_t;
+
 //****************************************************************************
 //                      LOCAL FUNCTION PROTOTYPES
 //****************************************************************************
@@ -166,7 +173,9 @@ void UpdateDutyCycle(unsigned long ulBase, unsigned long ulTimer,
                      unsigned long dutycycleGranularity);
 
 void readAdc(void);
-void transferData(int frequency);
+fillLevel_t intToFill(int toTranslate);
+int fillToInt(fillLevel_t toTranslate);
+void transferData(int frequency, fillLevel_t fillLevel);
 
 int BsdUdpClient(unsigned short usPort, short sTestBufLen, char *buffer);
 static long WlanConnect();
@@ -632,6 +641,46 @@ int IpAddressParser(char *ucCMD)
     return SUCCESS;
 }
 
+int fillToInt(fillLevel_t toTranslate)
+{
+	switch(toTranslate)
+	{
+	case EMPTY:
+		return 1;
+	case QUARTER:
+		return 2;
+	case HALF:
+		return 3;
+	case THREE_QUARTER:
+		return 4;
+	case FULL:
+		return 5;
+	case UNKNOWN:
+		return 6;
+	}
+	return 6;
+}
+
+fillLevel_t intToFill(int toTranslate)
+{
+	switch(toTranslate)
+	{
+	case 1:
+		return EMPTY;
+	case 2:
+		return QUARTER;
+	case 3:
+		return HALF;
+	case 4:
+		return THREE_QUARTER;
+	case 5:
+		return FULL;
+	case 6:
+		return UNKNOWN;
+	}
+	return UNKNOWN;
+}
+
 //*****************************************************************************
 //
 //! UserInput
@@ -644,10 +693,13 @@ int IpAddressParser(char *ucCMD)
 //*****************************************************************************
 long UserInput(void)
 {
+	fillLevel_t fillLevel;
 	int sweep;
     int iInput = 2;
     char acCmdStore[50];
     int lRetVal;
+    int iterations;
+    int iterationsTotal;
 
     UART_PRINT("Default settings: SSID Name: %s, PORT = %d, Packet Count = %d, "
                   "Destination IP: %d.%d.%d.%d\n\r",
@@ -659,11 +711,11 @@ long UserInput(void)
 
     do
     {
-        UART_PRINT("\r\nOptions:\r\n1. Send UDP packets.\r\n2. Receive UDP "
-                    "packets.\r\n3. Settings.\r\n4. Exit\r\n");
+        UART_PRINT("\r\nOptions:\r\n1. Empty \r\n2. Quarter \r\n"
+                    "3. Half\r\n4. Three Quarters \r\n5. Full\r\n");
         UART_PRINT("Enter the option to use: ");
         lRetVal = GetCmd(acCmdStore, sizeof(acCmdStore));
-        if(lRetVal == 0)
+        if(lRetVal == 0 || lRetVal > FILL_GRANULARITY)
         {
           //
           // No input. Just an enter pressed probably. Display a prompt.
@@ -672,20 +724,32 @@ long UserInput(void)
         }
         else
         {
-        		for(sweep = 0; sweep < FREQUENCY_SWEEPS; sweep++)
+        		iInput  = (int)strtoul(acCmdStore,0,10);
+        		fillLevel = intToFill(iInput);
+
+        		if(fillLevel == UNKNOWN)
+        			totalIterations = NUMBER_CLASSIFY_TESTS;
+        		else
+        			totalIterations = NUMBER_TRAINING_TESTS;
+
+        		for(iterations = 0; iterations < ; iterations++)
         		{
-        			//
-        			// Initialize the PWMs used for driving the LEDs
-        			//
-        			InitPWMModules(g_timerInterval[sweep]);
-        			UpdateDutyCycle(TIMERA3_BASE, TIMER_A, g_dutycycleGranularity[sweep]);
+        			for(sweep = 0; sweep < FREQUENCY_SWEEPS; sweep++)
+        			{
+        				//
+        				// Initialize the PWMs used for driving the LEDs
+        				//
+        				InitPWMModules(g_timerInterval[sweep]);
+        				UpdateDutyCycle(TIMERA3_BASE, TIMER_A, g_dutycycleGranularity[sweep]);
 
-        			MAP_UtilsDelay(8000000);
-        			readAdc();
-        			DeInitPWMModules();
+        				MAP_UtilsDelay(8000000);
+        				readAdc();
+        				DeInitPWMModules();
 
-        			transferData(g_frequencies[sweep]);
+        				transferData(g_frequencies[sweep], fillLevel);
+        			}
         		}
+
         }
         UART_PRINT("\n\r");
     }while(1);
@@ -732,11 +796,11 @@ int BsdUdpClient(unsigned short usPort, short sTestBufLen, char *buffer)
     }
 
 
-    for (iCounter=0 ; iCounter < sTestBufLen; iCounter++)
-    {
-    		UART_PRINT("%x",buffer[iCounter] & 0xFF);
-    }
-    	UART_PRINT("\n\r");
+//    for (iCounter=0 ; iCounter < sTestBufLen; iCounter++)
+//    {
+//    		UART_PRINT("%x",buffer[iCounter] & 0xFF);
+//    }
+//    	UART_PRINT("\n\r");
 
     // for a UDP connection connect is not required
     // sending UDP_PACKET_COUNT packets to the UDP server
@@ -1037,7 +1101,7 @@ void readAdc(void)
 	UART_PRINT("\n\r");
 }
 
-void transferData(int frequency)
+void transferData(int frequency, fillLevel_t fillLevel)
 {
     int iCounter;
     int lRetVal;
@@ -1051,6 +1115,7 @@ void transferData(int frequency)
 	{
 		((int *)g_cBsdBuf)[0] = frequency;
 		((int *)g_cBsdBuf)[1] = transferChunk;
+		((int *)g_cBsdBuf)[2] = fillToInt(fillLevel);
 
 		for (iCounter=0 ; iCounter < transferLength; iCounter++)
 		{
