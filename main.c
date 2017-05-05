@@ -699,7 +699,7 @@ long UserInput(void)
     char acCmdStore[50];
     int lRetVal;
     int iterations;
-    int iterationsTotal;
+    int totalIterations;
 
     UART_PRINT("Default settings: SSID Name: %s, PORT = %d, Packet Count = %d, "
                   "Destination IP: %d.%d.%d.%d\n\r",
@@ -712,7 +712,8 @@ long UserInput(void)
     do
     {
         UART_PRINT("\r\nOptions:\r\n1. Empty \r\n2. Quarter \r\n"
-                    "3. Half\r\n4. Three Quarters \r\n5. Full\r\n");
+                    "3. Half\r\n4. Three Quarters \r\n5. Full\r\n"
+                    "6. Unknown\r\n");
         UART_PRINT("Enter the option to use: ");
         lRetVal = GetCmd(acCmdStore, sizeof(acCmdStore));
         if(lRetVal == 0 || lRetVal > FILL_GRANULARITY)
@@ -732,7 +733,7 @@ long UserInput(void)
         		else
         			totalIterations = NUMBER_TRAINING_TESTS;
 
-        		for(iterations = 0; iterations < ; iterations++)
+        		for(iterations = 0; iterations < totalIterations; iterations++)
         		{
         			for(sweep = 0; sweep < FREQUENCY_SWEEPS; sweep++)
         			{
