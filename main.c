@@ -815,6 +815,9 @@ void Button_DisableInterrupt()
 
 void Button_Init()
 {
+//	MAP_PinTypeGPIO(PIN_04, PIN_MODE_0, false);               //Set GPIO[13] to GPIO Mode
+//	MAP_GPIODirModeSet(GPIOA1_BASE, 0x20, GPIO_DIR_MODE_IN);  //Set GPIO[13] to Input
+
 	//
 	// Set Interrupt Type for GPIO
 	//
