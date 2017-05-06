@@ -70,6 +70,7 @@
 #include "hw_types.h"
 #include "hw_common_reg.h"
 #include "hw_memmap.h"
+#include "gpio.h"
 #include "hw_adc.h"
 #include "hw_gprcm.h"
 #include "hw_apps_rcm.h"
@@ -154,11 +155,12 @@ typedef enum{
 #define DUTY_CYCLE				128 /*[0,255]*/
 
 #define NUMBER_TRAINING_TESTS 100
-#define NUMBER_CLASSIFY_TESTS 1
+#define NUMBER_CLASSIFY_TESTS 8
 
 #define FILL_GRANULARITY 5
 
 typedef enum {EMPTY, QUARTER, HALF, THREE_QUARTER, FULL, UNKNOWN} fillLevel_t;
+
 
 //****************************************************************************
 //                      LOCAL FUNCTION PROTOTYPES
@@ -177,6 +179,11 @@ fillLevel_t intToFill(int toTranslate);
 int fillToInt(fillLevel_t toTranslate);
 void transferData(int frequency, fillLevel_t fillLevel);
 
+void Button_EnableInterrupt();
+void Button_DisableInterrupt();
+void Button_Init();
+void setButtonTrue();
+
 int BsdUdpClient(unsigned short usPort, short sTestBufLen, char *buffer);
 static long WlanConnect();
 static void DisplayBanner();
@@ -189,6 +196,7 @@ static long ConfigureSimpleLinkToDefaultState();
 //                 GLOBAL VARIABLES -- Start
 //*****************************************************************************
 
+int buttonPressed = FALSE;
 volatile unsigned long  g_ulStatus = 0;//SimpleLink Status
 unsigned long  g_ulGatewayIP = 0; //Network Gateway IP address
 unsigned char  g_ucConnectionSSID[SSID_LEN_MAX+1]; //Connection SSID
@@ -709,6 +717,35 @@ long UserInput(void)
             SL_IPV4_BYTE(g_ulDestinationIp,1),
             SL_IPV4_BYTE(g_ulDestinationIp,0));
 
+    do{
+    		if(buttonPressed)
+    		{
+    			fillLevel = UNKNOWN;
+    			buttonPressed = FALSE;
+    			totalIterations = NUMBER_CLASSIFY_TESTS;
+
+        		for(iterations = 0; iterations < totalIterations; iterations++)
+        		{
+        			for(sweep = 0; sweep < FREQUENCY_SWEEPS; sweep++)
+        			{
+        				//
+        				// Initialize the PWMs used for driving the LEDs
+        				//
+        				InitPWMModules(g_timerInterval[sweep]);
+        				UpdateDutyCycle(TIMERA3_BASE, TIMER_A, g_dutycycleGranularity[sweep]);
+
+        				MAP_UtilsDelay(8000000);
+        				readAdc();
+        				DeInitPWMModules();
+
+        				transferData(g_frequencies[sweep], fillLevel);
+        			}
+        		}
+        		//Enable GPIO Interrupt
+        		Button_EnableInterrupt();
+    		}
+    }while(1);
+
     do
     {
         UART_PRINT("\r\nOptions:\r\n1. Empty \r\n2. Quarter \r\n"
@@ -758,6 +795,62 @@ long UserInput(void)
     return 0;
 
 }
+
+void Button_EnableInterrupt()
+{
+	//Enable GPIO Interrupt
+	MAP_GPIOIntClear(GPIOA1_BASE,GPIO_PIN_5);
+	MAP_IntPendClear(INT_GPIOA1);
+	MAP_IntEnable(INT_GPIOA1);
+	MAP_GPIOIntEnable(GPIOA1_BASE,GPIO_PIN_5);
+}
+
+void Button_DisableInterrupt()
+{
+	//Clear and Disable GPIO Interrupt
+	MAP_GPIOIntDisable(GPIOA1_BASE,GPIO_PIN_5);
+	MAP_GPIOIntClear(GPIOA1_BASE,GPIO_PIN_5);
+	MAP_IntDisable(INT_GPIOA1);
+}
+
+void Button_Init()
+{
+	//
+	// Set Interrupt Type for GPIO
+	//
+	MAP_GPIOIntTypeSet(GPIOA1_BASE,GPIO_PIN_5,GPIO_FALLING_EDGE);
+
+	//
+	// Register Interrupt handler
+	//
+#if defined(USE_TIRTOS) || defined(USE_FREERTOS) || defined(SL_PLATFORM_MULTI_THREADED)
+	// USE_TIRTOS: if app uses TI-RTOS (either networking/non-networking)
+	// USE_FREERTOS: if app uses Free-RTOS (either networking/non-networking)
+	// SL_PLATFORM_MULTI_THREADED: if app uses any OS + networking(simplelink)
+	osi_InterruptRegister(INT_GPIOA1,(P_OSI_INTR_ENTRY)setButtonTrue, \
+			INT_PRIORITY_LVL_1);
+#else
+	MAP_IntPrioritySet(INT_GPIOA1, INT_PRIORITY_LVL_1);
+	MAP_GPIOIntRegister(GPIOA1_BASE, setButtonTrue);
+#endif
+	//
+	// Enable Interrupt
+	//
+	MAP_GPIOIntClear(GPIOA1_BASE,GPIO_PIN_5);
+	MAP_GPIOIntEnable(GPIOA1_BASE,GPIO_INT_PIN_5);
+}
+
+void setButtonTrue()
+{
+    unsigned long ulPinState =  GPIOIntStatus(GPIOA1_BASE,1);
+
+    if(ulPinState & GPIO_PIN_5)
+    {
+        Button_DisableInterrupt();
+    		buttonPressed = TRUE;
+    }
+}
+
 
 //****************************************************************************
 //
@@ -1132,6 +1225,7 @@ void transferData(int frequency, fillLevel_t fillLevel)
 		ASSERT_ON_ERROR(lRetVal);
 	}
 }
+
 //****************************************************************************
 //                            MAIN FUNCTION
 //****************************************************************************
@@ -1222,6 +1316,8 @@ void main()
                 SL_IPV4_BYTE(g_ulIpAddr,2),
                 SL_IPV4_BYTE(g_ulIpAddr,1),
                 SL_IPV4_BYTE(g_ulIpAddr,0));
+
+    Button_Init();
 
     //read from uart and run test
     lRetVal = UserInput();
